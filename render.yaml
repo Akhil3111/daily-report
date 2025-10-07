@@ -1,0 +1,33 @@
+# ===============================
+# Render Configuration File
+# ===============================
+
+services:
+  # 1️⃣ Web Service (Handles the live website and API calls)
+  - type: web
+    name: attendance-bot-api
+    env: node
+
+    # Tell Render to build using the Dockerfile
+    dockerfilePath: Dockerfile
+    plan: free
+    healthCheckPath: /api/scrape-status   # A simple status check endpoint (add this to server.js)
+    startCommand: node server.js
+
+    # CRITICAL: Set these in Render Dashboard manually
+    # Environment variables: MONGO_URI, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, etc.
+
+cronJobs:
+  # 2️⃣ Automated Cron Job (Runs once daily)
+  - name: daily-attendance-check
+    # Schedule: Runs every day at 17:30 UTC (≈ 11:00 PM IST)
+    schedule: "30 17 * * *"
+    env: node
+
+    # Use the same Docker image as the web service
+    dockerfilePath: Dockerfile
+
+    # CRITICAL: Overrides CMD to run automation route via cURL
+    command: curl -X POST https://attendance-bot-api.onrender.com/api/automate
+
+    
