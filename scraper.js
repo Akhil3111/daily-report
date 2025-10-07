@@ -6,9 +6,10 @@ const { Builder, By, until } = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');
 const twilio = require('twilio');
 const dotenv = require('dotenv');
-const localChromedriver = require('chromedriver'); // <-- CRITICAL: Used to get the local driver path
+// CRITICAL LOCAL FIX: The 'chromedriver' package provides the executable path on Windows
+const localChromedriver = require('chromedriver'); 
 
-// Load environment variables immediately
+// Load environment variables immediately in case server.js failed to load them
 dotenv.config();
 
 // --- Configuration: Reading from Environment Variables ---
@@ -20,13 +21,12 @@ const {
 } = process.env;
 
 // Determine if running locally (for pathing)
-// When deploying to Render, set NODE_ENV=production
 const IS_LOCAL = process.env.NODE_ENV !== 'production';
 
-// CRITICAL FIX: Set driver paths conditionally
+// CRITICAL FIX: Define driver and binary paths conditionally
 // Local Path (Windows): Uses the path found by the 'chromedriver' package.
-// Cloud Path (Linux): Uses the path where the Dockerfile installs it.
-const CHROMEDRIVER_PATH = IS_LOCAL ? localChromedriver.path : '/usr/bin/chromedriver';
+// Cloud Path (Linux): Uses the standard path in the Puppeteer container.
+const CHROMEDRIVER_PATH = IS_LOCAL ? localChromedriver.path : '/usr/bin/google-chrome';
 const CHROME_BINARY_PATH = IS_LOCAL ? undefined : '/usr/bin/google-chrome';
 
 
@@ -36,7 +36,7 @@ const TWILIO_CLIENT = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN ? new twilio(TWILI
 
 async function sendWhatsAppMessage(to_number, message) {
     if (!TWILIO_CLIENT) {
-        console.error("Twilio client not initialized. Check environment variables in .env.");
+        console.error("Twilio client not initialized. Check environment variables.");
         return { success: false, error: "Twilio not configured." };
     }
     try {
@@ -67,7 +67,7 @@ function formatWhatsAppMessage(data) {
 }
 
 /**
- * Core scraping logic. Logs in, navigates, and extracts attendance data.
+ * Core scraping logic. Uses asynchronous Node.js style.
  */
 async function getAttendanceData(username, password) {
     let driver;
