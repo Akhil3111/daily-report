@@ -1,8 +1,13 @@
 services:
   - type: web
     name: attendance-bot-api
-    # REMOVED: The conflicting 'env: node' line
-    dockerfilePath: Dockerfile # <-- Tells Render to use Docker build system
+    dockerfilePath: Dockerfile
     plan: free
-    healthCheckPath: /
+    healthCheckPath: /api/scrape-status
     startCommand: node server.js
+
+cronJobs:
+  - name: daily-attendance-check
+    schedule: "30 17 * * *"
+    dockerfilePath: Dockerfile
+    command: curl -X POST https://attendance-bot-api.onrender.com/api/automate
