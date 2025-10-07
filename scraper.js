@@ -1,13 +1,13 @@
 /**
  * SCRAPER.JS
- * Contains all core logic for Selenium web scraping and Twilio messaging.
+ * Core logic for Selenium web scraping and Twilio messaging.
  */
+
 const { Builder, By, until } = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');
 const twilio = require('twilio');
 const dotenv = require('dotenv');
 
-// Load environment variables immediately
 dotenv.config();
 
 // --- Configuration: Reading from Environment Variables ---
@@ -18,21 +18,19 @@ const {
     TWILIO_JOIN_CODE
 } = process.env;
 
-// Determine if running locally (for pathing)
-// When deploying to Render, set NODE_ENV=production
+// Determine if running locally
 const IS_LOCAL = process.env.NODE_ENV !== 'production';
 
-// Driver paths — local uses system default, cloud uses Docker paths
-const CHROMEDRIVER_PATH = IS_LOCAL ? undefined : '/usr/bin/chromedriver';
+// Chrome paths
 const CHROME_BINARY_PATH = IS_LOCAL ? undefined : '/usr/bin/google-chrome';
+const CHROMEDRIVER_PATH = IS_LOCAL ? undefined : '/usr/bin/chromedriver';
 
-const TWILIO_CLIENT =
-  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
+// Initialize Twilio client
+const TWILIO_CLIENT = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
     ? new twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
     : null;
 
 // --- Helper Functions ---
-
 async function sendWhatsAppMessage(to_number, message) {
     if (!TWILIO_CLIENT) {
         console.error("Twilio client not initialized. Check environment variables.");
@@ -44,7 +42,7 @@ async function sendWhatsAppMessage(to_number, message) {
             body: message,
             to: `whatsapp:${to_number}`
         });
-        console.log(`WhatsApp message sent successfully to ${to_number}`);
+        console.log(`WhatsApp message sent to ${to_number}`);
         return { success: true };
     } catch (e) {
         console.error(`Failed to send WhatsApp message to ${to_number}:`, e.message);
@@ -65,72 +63,64 @@ function formatWhatsAppMessage(data) {
     return messageBody;
 }
 
-/**
- * Core scraping logic. Uses asynchronous Node.js style.
- */
+// --- Core Scraping Function ---
 async function getAttendanceData(username, password) {
     let driver;
     try {
         const chromeOptions = new chrome.Options();
-        
-        // Set necessary arguments for headless execution
         chromeOptions.addArguments(
-            '--headless', 
-            '--disable-gpu', 
-            '--no-sandbox', 
+            '--headless',
+            '--disable-gpu',
+            '--no-sandbox',
             '--window-size=1920,1080',
             '--disable-dev-shm-usage'
         );
-        
-        // CRITICAL FIX: Explicitly set the binary path for stability on cloud (Render)
+
         if (!IS_LOCAL) {
             chromeOptions.setChromeBinaryPath(CHROME_BINARY_PATH);
         }
 
-        // Build the ServiceBuilder instance pointing to the correct driver executable
-        const service = new chrome.ServiceBuilder(CHROMEDRIVER_PATH);
-        
+        const service = !IS_LOCAL ? new chrome.ServiceBuilder(CHROMEDRIVER_PATH) : undefined;
+
         driver = await new Builder()
             .forBrowser('chrome')
             .setChromeOptions(chromeOptions)
-            // Pass the ServiceBuilder instance directly
-            .setChromeService(service) 
+            .setChromeService(service)
             .build();
 
         await driver.get("https://login.vardhaman.org/");
         await driver.wait(until.elementLocated(By.name('txtuser')), 30000);
 
-        // 1. Login
+        // Login
         await driver.findElement(By.name('txtuser')).sendKeys(username);
         await driver.findElement(By.name('txtpass')).sendKeys(password);
         await driver.findElement(By.name('btnLogin')).click();
         
-        await driver.sleep(3000); // ASYNC sleep
+        await driver.sleep(3000);
 
-        // 2. Handle Pop-up 
+        // Close popup if exists
         try {
             const popupCloseBtn = await driver.wait(
-                until.elementLocated(By.xpath('//*[@id="ctl00_ContentPlaceHolder1_PopupCTRLMain_Image2"]')), 
-                5000 
+                until.elementLocated(By.xpath('//*[@id="ctl00_ContentPlaceHolder1_PopupCTRLMain_Image2"]')),
+                5000
             );
             await popupCloseBtn.click();
-            console.log("Pop-up closed.");
-        } catch (e) {
+        } catch {
             console.log("No pop-up detected.");
         }
 
-        await driver.sleep(3000); // ASYNC sleep
+        await driver.sleep(3000);
 
-        // 3. Click Attendance Button
+        // Go to attendance page
         const attendanceBtn = await driver.wait(
             until.elementLocated(By.xpath('//*[@id="ctl00_ContentPlaceHolder1_divAttendance"]/div[3]/a/div[2]')),
             10000
         );
         await attendanceBtn.click();
         
-        await driver.sleep(5000); // ASYNC sleep
+        await driver.sleep(5000);
 
-        // 4. Extract Total Percentage
+        // Get total percentage
         let totalPercentage = 'N/A';
         try {
             const totalElement = await driver.wait(
@@ -138,11 +128,11 @@ async function getAttendanceData(username, password) {
                 10000
             );
             totalPercentage = await totalElement.getText();
-        } catch (e) {
+        } catch {
             console.warn("Could not find total attendance percentage.");
         }
 
-        // 5. Extract Subject Details
+        // Get subject-wise details
         const subjectItems = await driver.findElements(By.css(".atten-sub.bus-stops ul li"));
         const attendanceList = [];
 
