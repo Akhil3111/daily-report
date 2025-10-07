@@ -6,10 +6,8 @@ const { Builder, By, until } = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');
 const twilio = require('twilio');
 const dotenv = require('dotenv');
-// CRITICAL LOCAL FIX: The 'chromedriver' package provides the executable path on Windows
-const localChromedriver = require('chromedriver'); 
 
-// Load environment variables immediately in case server.js failed to load them
+// Load environment variables immediately
 dotenv.config();
 
 // --- Configuration: Reading from Environment Variables ---
@@ -21,16 +19,17 @@ const {
 } = process.env;
 
 // Determine if running locally (for pathing)
+// When deploying to Render, set NODE_ENV=production
 const IS_LOCAL = process.env.NODE_ENV !== 'production';
 
-// CRITICAL FIX: Define driver and binary paths conditionally
-// Local Path (Windows): Uses the path found by the 'chromedriver' package.
-// Cloud Path (Linux): Uses the standard path in the Puppeteer container.
-const CHROMEDRIVER_PATH = IS_LOCAL ? localChromedriver.path : '/usr/bin/google-chrome';
+// Driver paths — local uses system default, cloud uses Docker paths
+const CHROMEDRIVER_PATH = IS_LOCAL ? undefined : '/usr/bin/chromedriver';
 const CHROME_BINARY_PATH = IS_LOCAL ? undefined : '/usr/bin/google-chrome';
 
-
-const TWILIO_CLIENT = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN ? new twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
+const TWILIO_CLIENT =
+  TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
+    ? new twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    : null;
 
 // --- Helper Functions ---
 
