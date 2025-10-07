@@ -4,7 +4,8 @@
   "description": "A MERN application for automated college attendance reports.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "postinstall": "echo 'Puppeteer Chrome already installed in base image'"
   },
   "dependencies": {
     "express": "^4.18.2",
@@ -14,6 +15,7 @@
     "selenium-webdriver": "^4.15.0",
     "twilio": "^4.19.0",
     "axios": "^1.6.2",
-    "path": "^0.12.7"
+    "path": "^0.12.7",
+    "puppeteer": "^21.6.0"
   }
 }
