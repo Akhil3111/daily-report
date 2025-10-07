@@ -126,6 +126,11 @@ app.post('/api/automate', async (req, res) => {
 // --- Serve static files (React frontend) ---
 // This is the correct, simpler way to serve the static frontend (index.html).
 // Express will now look in the 'public' directory for every request not caught above.
+// --- Health check route for Render ---
+app.get('/api/scrape-status', (req, res) => {
+  res.status(200).json({ status: 'Server running and healthy' });
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 
