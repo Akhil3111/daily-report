@@ -1,6 +1,6 @@
 /**
  * SERVER.JS
- * Sets up the Express server, MongoDB connection, and API routes.
+ * Express server with optional MongoDB. Scraping + WhatsApp works without DB.
  */
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -9,136 +9,146 @@ const dotenv = require('dotenv');
 const path = require('path');
 const { getAttendanceData, sendWhatsAppMessage, formatWhatsAppMessage } = require('./scraper');
 
-// Load environment variables from .env file (for local development)
+// Load .env
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 10000; 
+const PORT = process.env.PORT || 10000;
 const MONGO_URI = process.env.MONGO_URI;
 
 // Middleware
 app.use(bodyParser.json());
 
-// --- MongoDB Connection ---
-mongoose.connect(MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-    serverSelectionTimeoutMS: 10000 // 10 seconds timeout
-})
-.then(() => console.log("MongoDB connected"))
-.catch(err => console.error("MongoDB connection error:", err));
+// --- MongoDB Connection (Optional) ---
+let dbConnected = false;
 
-// --- MongoDB Schema (User and Credentials) ---
-const UserSchema = new mongoose.Schema({
-    userId: { type: String, required: true, unique: true },
-    username: { type: String, required: true },
-    password: { type: String, required: true },
-    whatsapp: { type: String, required: true },
-    data: { type: Object, default: {} },
-    lastUpdated: { type: Date, default: Date.now }
+if (MONGO_URI) {
+    mongoose.connect(MONGO_URI, {
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
+        serverSelectionTimeoutMS: 5000
+    }).then(() => {
+        console.log('MongoDB connected');
+        dbConnected = true;
+    }).catch(err => {
+        console.error('MongoDB connection failed. Proceeding without DB:', err.message);
+        dbConnected = false;
+    });
+}
+
+// --- MongoDB Schema (Optional) ---
+let User;
+if (dbConnected) {
+    const UserSchema = new mongoose.Schema({
+        username: { type: String, required: true },
+        password: { type: String, required: true },
+        whatsapp: { type: String, required: true },
+        data: { type: Object, default: {} },
+        lastUpdated: { type: Date, default: Date.now }
+    });
+    User = mongoose.model('User', UserSchema);
+}
+
+// --- Health check route for Render ---
+app.get('/api/scrape-status', (req, res) => {
+    res.status(200).json({ status: 'Server running and healthy' });
 });
-const User = mongoose.model('User', UserSchema);
 
-// --- API Routes ---
-
-// 1. Initial Scrape and Registration Endpoint
+// --- Scrape and send WhatsApp route ---
 app.post('/api/scrape', async (req, res) => {
-    const { userId, username, password, whatsapp } = req.body;
+    const { username, password, whatsapp } = req.body;
 
-    if (!userId || !username || !password || !whatsapp) {
-        return res.status(400).json({ error: 'Missing required fields: userId, username, password, or whatsapp number.' });
+    if (!username || !password || !whatsapp) {
+        return res.status(400).json({ error: 'Missing required fields' });
     }
 
     try {
-        // --- A. Save/Update credentials in MongoDB ---
-        await User.updateOne(
-            { userId: userId },
-            { $set: { username, password, whatsapp } },
-            { upsert: true }
-        );
-
-        // --- B. Perform the immediate scrape ---
+        // 1️⃣ Scrape attendance
         const scrapedData = await getAttendanceData(username, password);
 
         if (scrapedData.error) {
             return res.status(500).json({ error: scrapedData.error });
         }
-        
-        // --- C. Send Instant WhatsApp Report & Opt-in Instruction ---
+
+        // 2️⃣ Send WhatsApp report
         const reportMessage = formatWhatsAppMessage(scrapedData);
-        
-        const joinCode = process.env.TWILIO_JOIN_CODE || 'join-code'; 
-        const twilioNumber = process.env.TWILIO_WHATSAPP_NUMBER || 'your_twilio_number';
-        const optInMessage = `\n\n📢 *IMPORTANT: Daily reports will FAIL unless you first send the code "${joinCode}" to ${twilioNumber}.*`;
+        await sendWhatsAppMessage(whatsapp, reportMessage);
 
-        const { success, error } = await sendWhatsAppMessage(whatsapp, reportMessage + optInMessage);
+        // 3️⃣ Save to DB only if connected
+        if (dbConnected) {
+            try {
+                await User.updateOne(
+                    { username },
+                    { $set: { username, password, whatsapp, data: scrapedData, lastUpdated: new Date() } },
+                    { upsert: true }
+                );
+            } catch (dbErr) {
+                console.error("DB save failed, continuing without DB:", dbErr.message);
+            }
+        }
 
-        res.json({
-            message: "Credentials saved. Immediate report sent (check your WhatsApp for opt-in instructions).",
-            data: scrapedData,
-            whatsappSuccess: success,
-            optInInstruction: optInMessage
-        });
+        res.json({ message: "Scraped and WhatsApp sent successfully", data: scrapedData });
 
-    } catch (e) {
-        console.error('Server error during scrape/save:', e);
-        res.status(500).json({ error: 'An internal server error occurred during processing.' });
+    } catch (err) {
+        console.error("Unexpected error:", err);
+        res.status(500).json({ error: "Scrape failed" });
     }
 });
 
-// 2. Automation Route (Used by a Cloud Scheduler/Cron Job)
+// --- Automation route for cron/daily jobs ---
 app.post('/api/automate', async (req, res) => {
     try {
-        console.log('Starting automated daily attendance check for all users...');
-        const users = await User.find({});
-        
-        if (users.length === 0) {
-            return res.json({ message: 'No registered users found.' });
+        console.log('Starting automated daily attendance check...');
+
+        let users = [];
+        if (dbConnected) {
+            users = await User.find({});
+        }
+
+        if (!dbConnected || users.length === 0) {
+            console.log('No DB users found. Automation can run with manual test data if needed.');
+            return res.json({ message: 'No registered users. Automation skipped.' });
         }
 
         const results = [];
         for (const user of users) {
-            console.log(`Processing user: ${user.userId}`);
-            
             const scrapedData = await getAttendanceData(user.username, user.password);
 
             if (scrapedData.error) {
-                console.error(`Skipping report for ${user.userId} due to scrape error: ${scrapedData.error}`);
-                results.push({ userId: user.userId, status: 'Scrape Failed', error: scrapedData.error });
+                console.error(`Scrape failed for ${user.username}: ${scrapedData.error}`);
+                results.push({ username: user.username, status: 'Scrape Failed', error: scrapedData.error });
                 continue;
             }
 
-            await User.updateOne(
-                { userId: user.userId },
-                { $set: { data: scrapedData, lastUpdated: new Date() } }
-            );
+            // Update DB if connected
+            if (dbConnected) {
+                try {
+                    await User.updateOne(
+                        { username: user.username },
+                        { $set: { data: scrapedData, lastUpdated: new Date() } }
+                    );
+                } catch (dbErr) {
+                    console.error(`DB update failed for ${user.username}: ${dbErr.message}`);
+                }
+            }
 
             const reportMessage = formatWhatsAppMessage(scrapedData);
             const { success, error } = await sendWhatsAppMessage(user.whatsapp, reportMessage);
-            
-            results.push({ userId: user.userId, status: success ? 'Report Sent' : 'Twilio Failed', error });
+            results.push({ username: user.username, status: success ? 'Report Sent' : 'Twilio Failed', error });
         }
 
-        res.json({ message: 'Daily checks complete.', results });
+        res.json({ message: 'Daily automation complete.', results });
 
-    } catch (e) {
-        console.error('Automation error:', e);
+    } catch (err) {
+        console.error('Automation error:', err);
         res.status(500).json({ error: 'Automation failed.' });
     }
 });
 
-// --- Serve static files (React frontend) ---
-// This is the correct, simpler way to serve the static frontend (index.html).
-// Express will now look in the 'public' directory for every request not caught above.
-// --- Health check route for Render ---
-app.get('/api/scrape-status', (req, res) => {
-  res.status(200).json({ status: 'Server running and healthy' });
-});
-
+// --- Serve frontend static files ---
 app.use(express.static(path.join(__dirname, 'public')));
 
-
-// Start Server
+// --- Start server ---
 app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}. Connect to MongoDB: ${mongoose.connection.readyState === 1 ? 'Yes' : 'No'}`);
+    console.log(`Server running on port ${PORT}`);
 });
