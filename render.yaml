@@ -6,11 +6,3 @@ services:
     plan: free
     healthCheckPath: /
     startCommand: node server.js
-
-cronJobs:
-  - name: daily-attendance-check
-    schedule: "30 17 * * *" # Runs every day at 17:30 UTC
-    env: node
-    dockerfilePath: Dockerfile
-    # Overrides CMD to run automation route via cURL
-    command: curl -X POST https://attendance-bot-api.onrender.com/api/automate
